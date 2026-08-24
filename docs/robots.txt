@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://nulearnmaster.github.io/autopilot-blog/sitemap.xml

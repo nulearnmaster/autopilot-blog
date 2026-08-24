@@ -1,0 +1,36 @@
+[site]
+title = "똑똑한 소비 리뷰"
+base_url = "https://nulearnmaster.github.io/autopilot-blog"
+description = "살기 전에 꼭 보는 제품 추천 · 비교 · 절약 가이드"
+lang = "ko"
+author = "nulearnmaster"
+
+[build]
+posts_dir = "content"
+site_dir = "docs"
+articles_per_run = 3
+
+[affiliate]
+enabled = true
+search_url_template = "https://www.coupang.com/np/search?q={query}&channel=user"
+partner_note = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+cta_text = "{product} 최저가 확인하기"
+max_links_per_article = 6
+
+[adsense]
+client_id = ""
+slot_top = ""
+slot_bottom = ""
+
+[llm]
+api_base = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-4o-mini"
+temperature = 0.8
+max_tokens = 4000
+
+[scout]
+max_add = 10
+
+[indexnow]
+key = ""
