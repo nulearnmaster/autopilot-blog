@@ -3,6 +3,7 @@ import html
 import json
 import os
 import re
+import shutil
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -141,6 +142,8 @@ def build_site():
         posts.append((meta, to_html(body)))
     posts.sort(key=lambda p: p[0]["date"], reverse=True)
 
+    (site_dir / "posts").mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(site_dir / "posts", ignore_errors=True)
     (site_dir / "posts").mkdir(parents=True, exist_ok=True)
     base = cfg["site"]["base_url"].rstrip("/")
 
