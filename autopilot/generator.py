@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -10,8 +11,11 @@ from pathlib import Path
 
 import tomllib
 
+from . import llmauth
+
 ROOT = Path(__file__).resolve().parents[1]
 KST = timezone(timedelta(hours=9))
+CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 
 PROMPT = """당신은 한국 최고의 리뷰 블로거입니다. 키워드 "{keyword}" (카테고리: {category})로
 구매 전환율이 높은 블로그 글을 마크다운으로 작성하세요.
@@ -61,33 +65,120 @@ def slug_for(keyword):
     return f"{datetime.now(KST):%Y%m%d}-{digest}"
 
 
-def call_llm(cfg, keyword, category):
-    llm = cfg["llm"]
-    api_key = os.environ.get(llm["api_key_env"], "").strip()
-    if not api_key:
+def _extract_text(data, deltas=""):
+    parts = []
+    for item in data.get("output") or []:
+        for c in item.get("content") or []:
+            if c.get("type") in ("output_text", "text"):
+                parts.append(c.get("text", ""))
+    text = "\n".join(p for p in parts if p).strip()
+    if not text and deltas:
+        return deltas.strip()
+    if not text:
+        try:
+            return data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return ""
+    return text
+
+
+def _parse_body(raw):
+    raw = raw.strip()
+    if raw.startswith("{"):
+        try:
+            return json.loads(raw), ""
+        except Exception:
+            return {}, ""
+    data = {}
+    deltas = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        chunk = line[5:].strip()
+        if not chunk or chunk == "[DONE]":
+            continue
+        try:
+            j = json.loads(chunk)
+        except Exception:
+            continue
+        t = j.get("type", "")
+        if t == "response.output_text.delta":
+            deltas.append(j.get("delta", ""))
+        elif t == "response.completed" and isinstance(j.get("response"), dict):
+            data = j["response"]
+        elif j.get("output"):
+            data = j
+    return data, "".join(deltas)
+
+
+def _via_codex(prompt, llm):
+    token, account = llmauth.codex_tokens()
+    if not token:
         return None
     payload = json.dumps({
-        "model": llm["model"],
-        "temperature": llm["temperature"],
-        "max_tokens": llm["max_tokens"],
-        "messages": [{
-            "role": "user",
-            "content": PROMPT.format(keyword=keyword, category=category),
-        }],
+        "model": llm.get("codex_model") or llmauth.get_codex_model(),
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
+        "store": False,
+        "stream": True,
     }).encode("utf-8")
     req = urllib.request.Request(
-        f"{llm['api_base'].rstrip('/')}/chat/completions",
+        CODEX_URL,
         data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "chatgpt-account-id": account,
+            "User-Agent": "codex_cli_rs",
+            "Accept": "text/event-stream",
+        },
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        text = body["choices"][0]["message"]["content"].strip()
-        text = re.sub(r"^```(?:markdown)?\s*|\s*```$", "", text)
-        return text if text.startswith("# ") else None
-    except Exception:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data, deltas = _parse_body(resp.read().decode("utf-8", "ignore"))
+            return _extract_text(data, deltas)
+    except urllib.error.HTTPError as e:
+        print(f"codex 백엔드 HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}")
         return None
+    except Exception as e:
+        print(f"codex 백엔드 오류: {e}")
+        return None
+
+
+def call_llm(cfg, keyword, category):
+    llm = cfg["llm"]
+    prompt = PROMPT.format(keyword=keyword, category=category)
+    mode = llmauth.get_mode()
+    text = None
+    if mode == "codex":
+        text = _via_codex(prompt, llm)
+        source = "llm"
+    elif mode == "api_key":
+        api_key = llmauth.api_key()
+        payload = json.dumps({
+            "model": llm["model"],
+            "temperature": llm["temperature"],
+            "max_tokens": llm["max_tokens"],
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{llm['api_base'].rstrip('/')}/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            text = body["choices"][0]["message"]["content"].strip()
+        except Exception:
+            text = None
+        source = "llm"
+    else:
+        return None
+    if not text:
+        return None
+    text = re.sub(r"^```(?:markdown)?\s*|\s*```$", "", text.strip())
+    return text if text.startswith("# ") else None
 
 
 def fallback_article(keyword, category):
