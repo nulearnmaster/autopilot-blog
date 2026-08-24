@@ -82,6 +82,8 @@ def run_job(kind="full", count=None):
             else:
                 log("생성할 키워드 없음")
             if kind in ("full", "build"):
+                import os
+                os.environ["AUTOPILOT_TRACK"] = "1"
                 with redirect_stdout(LogTee()):
                     build_site()
                 STATE["last_build"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")

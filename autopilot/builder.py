@@ -1,6 +1,7 @@
 import base64
 import html
 import json
+import os
 import re
 import urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -36,6 +37,9 @@ def strip_tags(s):
 
 
 def track_links(body_html, slug):
+    if os.environ.get("AUTOPILOT_TRACK") != "1":
+        return body_html
+
     def repl(m):
         url = html.unescape(m.group(1))
         if "coupang.com" not in url:
